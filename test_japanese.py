@@ -169,7 +169,7 @@ class JapaneseTest(unittest.TestCase):
         self.assertEqual(suites["jmmlu:rc:bpb::ja"], ["jmmlu_history:rc:bpb::ja", "jmmlu_physics:rc:bpb::ja"])
         selection = om.select(artifact, self.directory / "out", ["ja:bpb"])
         _, metrics, tasks = om.read_selection(selection)
-        self.assertEqual(set(metrics.values()), {"bits_per_byte_corr"})
+        self.assertEqual(set(metrics.values()), {om.DIFFERENCE})
         answers = {alias: [question["pairs"][0][1] for question in asked] for alias, asked in tasks.items()}
         self.assertEqual(answers, {"jcommonsenseqa:rc:bpb::ja": ["答1-1", "答2-4"], "jsquad:rc:bpb::ja": ["答0"],
                                    "kuci:rc:bpb::ja": ["続き1c"], "xwinograd_ja:rc:bpb::ja": ["は速かった。"],

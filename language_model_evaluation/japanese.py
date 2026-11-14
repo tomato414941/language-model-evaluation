@@ -17,6 +17,12 @@ measure, from each task's own data at a fixed revision:
 The tasks are those of llm-jp-eval's categories that a correct answer of a few words can score: commonsense
 reasoning, reading comprehension, examinations and question answering.
 
+A task scores an answer by the bits that it adds to its question (olmes_measure.DIFFERENCE): no space comes before a
+Japanese answer, so a tokenizer can join the question's last token with the answer's first, and the tokens that OLMES
+takes as the answer's would then leave out the joined one (about a third of KUCI's answers and a fifth to a quarter of
+xWinograd's, in the tokenizers of the language-model projects); the difference counts the whole answer, and is OLMES's
+bits per byte wherever the tokens part at the answer.
+
 The artifact has the form of olmes_build.py's, every choice of a question a request, so that olmes_measure's select,
 rows and score read it unchanged. Its suite `ja:bpb` holds the tasks, JMMLU as the group of its subjects. A
 request's `doc` holds its question as the task writes it, by which overlap.py finds the question in other text, and
@@ -277,7 +283,7 @@ def make(out, raw):
             file.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in requests(asked)).encode("utf-8"))
         (work / "requests" / f"{alias}.jsonl.gz").write_bytes(data.getvalue())
         configs[alias] = {"task_name": alias.partition(":")[0], **settings, "seed": SEED,
-                          "primary_metric": "bits_per_byte_corr", "compute_gold_bpb": True}
+                          "primary_metric": olmes_measure.DIFFERENCE, "compute_gold_bpb": True}
     (work / "tasks.json").write_text(json.dumps(configs, indent=1))
     suites = {SUITE: sorted(set(tasks) - set(subjects)) + [JMMLU], JMMLU: sorted(subjects)}
     (work / "suites.json").write_text(json.dumps(suites, indent=1))

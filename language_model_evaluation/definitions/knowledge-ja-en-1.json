@@ -17,11 +17,11 @@
   "text": "paloma-val-2b60e4850e11cb21"
  },
  "japanese": {
-  "requests": "requests-5aaf7a5ee5708bc1",
+  "requests": "requests-a5e727ca55d8d813",
   "suites": [
    "ja:bpb"
   ],
-  "selection": "selection-9ca4137e8a33ad76"
+  "selection": "selection-76a7cdf2b19c4d49"
  },
  "japanese_text": {
   "split": "val",
@@ -39,7 +39,7 @@
     "val": "japanese-text-val-955cabb03efb4186",
     "test": "japanese-text-test-c5b6711e08274ad4"
    },
-   "artifact": "overlap-619e4646774958b5"
+   "artifact": "overlap-8ce10e94e145761f"
   }
  },
  "categories": {

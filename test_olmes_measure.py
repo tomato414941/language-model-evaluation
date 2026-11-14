@@ -225,6 +225,49 @@ class RowsTest(unittest.TestCase):
                 om.read_rows(made, selection, other)
 
 
+def joining(texts):
+    """Characters as tokens, except that "xy" is one token, 1000, as a tokenizer joins what no space parts."""
+    found = []
+    for text in texts:
+        tokens, at = [], 0
+        while at < len(text):
+            joined = text.startswith("xy", at)
+            tokens.append(1000 if joined else ord(text[at]))
+            at += 2 if joined else 1
+        found.append(tokens)
+    return found
+
+
+class DifferenceTest(ArtifactTest):
+    def setUp(self):
+        super().setUp()
+        # the first answer's first letter joins the question's last one; the second's parts from it
+        asked = [request(0, 0, 0, "yz", context="abx"), request(1, 0, 0, "cd", context="ab")]
+        requests = make_requests(self.directory, {"t": ({"primary_metric": om.DIFFERENCE}, asked)}, {"s": ["t"]})
+        self.selection = om.select(requests, self.directory, ["s"])
+
+    def test_reads_the_question_and_answer_together_and_the_question_alone_from_the_first_token_they_part_at(self):
+        rows = om.selection_rows(self.selection, joining, 0)
+        self.assertEqual(rows, [([0, 97, 98, 1000, 122], 2), ([0, 97, 98, 120], 1),  # from the joined token
+                                ([0, 97, 98, 99, 100], 2), ([0, 97, 98], 0)])  # the answer's, and nothing
+        # where the tokens part at the answer, the first row is OLMES's own
+        self.assertEqual(rows[2], om.encode_rows(joining, 0, [("ab", "cd")])[0])
+
+    def test_scores_an_answer_by_the_bits_that_it_adds_to_its_question_however_the_tokens_join(self):
+        def read(rows):  # each token's log-likelihood minus a hundredth of its number
+            return [-sum(tokens[len(tokens) - scored:]) / 100 for tokens, scored in rows], [False] * len(rows)
+
+        found = om.values(self.selection, read, om.selection_rows(self.selection, joining, 0))
+        joined = ((1000 + 122) - 120) / 100  # "xy" and "z" less "x": all of "yz"
+        parted = (99 + 100) / 100
+        self.assertEqual(len(found["t"]), 2)
+        self.assertAlmostEqual(found["t"][0], om.LOG_2_OF_E * joined / 2)
+        self.assertAlmostEqual(found["t"][1], om.LOG_2_OF_E * parted / 2)
+        olmes = om.question_values("bits_per_byte_corr", om.read_selection(self.selection)[2]["t"][1:],
+                                   *read(om.encode_rows(joining, 0, [("ab", "cd")])), [2])
+        self.assertAlmostEqual(found["t"][1], olmes[0])  # the same as OLMES's where the tokens part
+
+
 class WindowTest(unittest.TestCase):
     def test_reads_a_row_within_the_context_whole(self):
         self.assertEqual(om.windows(6, 2, 8), [(0, 6, 4)])

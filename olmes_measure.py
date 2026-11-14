@@ -8,7 +8,8 @@ every request of some suites as a requests artifact. Everything here works from 
   alone for bits per byte, every choice for accuracy), or a fixed random share of each task's questions;
 - reserve: a selection of the questions that another selection does not hold, to be kept aside from decisions;
 - within: where a selection's questions stand in a larger one, so that a result on the larger scores the smaller;
-- rows: a selection's requests in a tokenizer, as OLMES's Hugging Face wrapper gives them to a model;
+- rows: a selection's requests in a tokenizer, as OLMES's Hugging Face wrapper gives them to a model, and for a task
+  scored by DIFFERENCE, the context alone beside each (difference_rows);
 - score: each task's and each suite's score, as OLMES computes them, from a model's logits on those rows;
 - values: each question's value under its task's metric, of which the task's score is the mean.
 
@@ -42,7 +43,13 @@ SCORING_FIELDS = ("primary_metric", "compute_gold_bpb", "metadata")
 # The requests that each primary metric reads of a question: the one at its label, its first, or every choice, and
 # with "uncond" the same choices without the question.
 READS = {"bits_per_byte_corr": "label", "greedy_acc": "first", "acc_raw": "choices", "acc_per_token": "choices",
-         "acc_per_char": "choices", "acc_per_byte": "choices", "acc_uncond": "uncond"}
+         "acc_per_char": "choices", "acc_per_byte": "choices", "acc_uncond": "uncond",
+         "bits_per_byte_corr_difference": "label"}
+# The correct answer's bits per byte as the bits of the context and the answer read together less those of the context
+# read alone, which no OLMES task is scored by. It is bits_per_byte_corr wherever a tokenizer parts the two at the
+# answer, as it does where a space comes before the answer, and still counts the whole answer where it joins the
+# context's last token with the answer's first, as it can where no space comes before it (in Japanese).
+DIFFERENCE = "bits_per_byte_corr_difference"
 
 
 def file_sha256(path):
@@ -252,12 +259,9 @@ def pairs(tasks):
             for p in question["pairs"] + question.get("uncond", [])]
 
 
-def encode_rows(encode, bos, pairs, length=LENGTH):
-    """Each (context, continuation) as OLMES's Hugging Face wrapper gives it to a model, with `encode` a function from
-    texts to their tokens without special tokens: the context's trailing whitespace moves to the continuation, the
-    continuation's tokens are what encoding both together adds after the context's own, the row begins with `bos`
-    and keeps at most `length` + 1 tokens from its end. Returns each row's tokens and the number of its last tokens
-    that are the continuation's."""
+def _split(pairs):
+    """Each (context, continuation)'s context, and the context with the continuation after it, as OLMES's Hugging Face
+    wrapper reads them: the context's trailing whitespace moves to the continuation."""
     contexts, wholes = [], []
     for context, continuation in pairs:
         if not context:
@@ -267,14 +271,55 @@ def encode_rows(encode, bos, pairs, length=LENGTH):
             context, continuation = context[:-spaces], context[-spaces:] + continuation
         contexts.append(context)
         wholes.append(context + continuation)
-    rows = []
-    # A few thousand at a time: a tokenizer's encodings of all of them at once can take tens of GB.
+    return contexts, wholes
+
+
+def _encoded(encode, pairs):
+    """Each pair's context and whole (`_split`) in tokens, a few thousand at a time: a tokenizer's encodings of all of
+    them at once can take tens of GB."""
+    contexts, wholes = _split(pairs)
     for at in range(0, len(contexts), 2048):
-        for context, whole in zip(encode(contexts[at:at + 2048]), encode(wholes[at:at + 2048])):
-            answer = whole[len(context):]
-            if not 0 < len(answer) <= length:
-                raise ValueError(f"a continuation of {len(answer)} tokens, which OLMES's wrapper refuses")
-            rows.append(([bos, *context, *answer][-(length + 1):], len(answer)))
+        yield from zip(encode(contexts[at:at + 2048]), encode(wholes[at:at + 2048]))
+
+
+def encode_rows(encode, bos, pairs, length=LENGTH):
+    """Each (context, continuation) as OLMES's Hugging Face wrapper gives it to a model, with `encode` a function from
+    texts to their tokens without special tokens: the context's trailing whitespace moves to the continuation, the
+    continuation's tokens are what encoding both together adds after the context's own, the row begins with `bos`
+    and keeps at most `length` + 1 tokens from its end. Returns each row's tokens and the number of its last tokens
+    that are the continuation's."""
+    rows = []
+    for context, whole in _encoded(encode, pairs):
+        answer = whole[len(context):]
+        if not 0 < len(answer) <= length:
+            raise ValueError(f"a continuation of {len(answer)} tokens, which OLMES's wrapper refuses")
+        rows.append(([bos, *context, *answer][-(length + 1):], len(answer)))
+    return rows
+
+
+def difference_rows(encode, bos, pairs, length=LENGTH):
+    """Two rows for each (context, continuation), whose difference is the continuation's log-likelihood under
+    DIFFERENCE: the context and the continuation read together, and the context read alone, as encode_rows reads them,
+    each scored from the first token in which the two part. Where the whole's tokens begin with the context's own, the
+    first is encode_rows's row and the second scores nothing."""
+    rows = []
+    for context, whole in _encoded(encode, pairs):
+        part = next((at for at, (mine, theirs) in enumerate(zip(context, whole)) if mine != theirs), len(context))
+        if not 0 < len(whole) - part <= length:
+            raise ValueError(f"a continuation of {len(whole) - part} tokens, which OLMES's wrapper refuses")
+        rows += [([bos, *whole][-(length + 1):], len(whole) - part),
+                 ([bos, *context][-(length + 1):], len(context) - part)]
+    return rows
+
+
+def selection_rows(selection, encode, bos, length=LENGTH):
+    """What a model reads of a selection, task by task in the order that `values` takes them: encode_rows of each
+    task's pairs, or difference_rows of those of a task scored by DIFFERENCE."""
+    _, metrics, tasks = read_selection(selection)
+    rows = []
+    for alias, asked in tasks.items():
+        found = [p for question in asked for p in question["pairs"] + question.get("uncond", [])]
+        rows += (difference_rows if metrics[alias] == DIFFERENCE else encode_rows)(encode, bos, found, length)
     return rows
 
 
@@ -286,13 +331,12 @@ def tokenizer_encode(tokenizer_json):
 
 
 def rows(selection, out, tokenizer_json, bos, length=LENGTH):
-    """A rows artifact in the directory `out`: encode_rows of a selection's pairs in a tokenizer, which `score` takes
-    in their place when the tokenizer's contents are the same."""
+    """A rows artifact in the directory `out`: selection_rows of a selection in a tokenizer, which `score` takes in
+    their place when the tokenizer's contents are the same."""
     import numpy as np
 
     check(selection)
-    _, _, tasks = read_selection(selection)
-    made = encode_rows(tokenizer_encode(tokenizer_json), bos, pairs(tasks), length)
+    made = selection_rows(selection, tokenizer_encode(tokenizer_json), bos, length)
     tokens = np.concatenate([np.asarray(row, dtype=np.int64) for row, _ in made])
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -379,12 +423,13 @@ def question_values(metric, questions, totals, greedy, answers):
     """Each question's value under its task's primary metric, as OLMES's MCAccuracy computes it before it averages
     them, from the log-likelihoods, the greedy flags and the continuations' tokens of the questions' rows, in their
     order. Of equal scores the first choice wins."""
-    values, at = [], 0
+    values, at, per_pair = [], 0, 2 if metric == DIFFERENCE else 1  # the rows that read each pair
     for question in questions:
         n = len(question["pairs"])
-        own, mine = totals[at:at + n], range(at, at + n)
-        if metric == "bits_per_byte_corr":
-            values.append(-LOG_2_OF_E * (own[0] / max(len(question["pairs"][0][1].encode("utf-8")), 1)))
+        own, mine = totals[at:at + n * per_pair], range(at, at + n * per_pair)
+        if metric in ("bits_per_byte_corr", DIFFERENCE):
+            added = own[0] - own[1] if metric == DIFFERENCE else own[0]
+            values.append(-LOG_2_OF_E * (added / max(len(question["pairs"][0][1].encode("utf-8")), 1)))
         elif metric == "greedy_acc":
             values.append(float(greedy[at]))
         elif metric == "acc_per_byte":
@@ -396,7 +441,7 @@ def question_values(metric, questions, totals, greedy, answers):
                   "acc_per_char": [total / max(len(c), 1) for total, (_, c) in zip(own, question["pairs"])],
                   "acc_uncond": [total - without for total, without in zip(own, totals[at + n:at + 2 * n])]}[metric]
             values.append(float(by.index(max(by)) == question["label"]))
-        at += n + len(question.get("uncond", []))
+        at += (n + len(question.get("uncond", []))) * per_pair
     return values
 
 
@@ -419,14 +464,15 @@ def suite_scores(groups, scores):
 
 
 def values(selection, read, made_rows):
-    """Each task's questions' values from a selection, its rows (encode_rows of its pairs, or read_rows of a rows
-    artifact) and a reader: {task: [value]}, the questions in the selection's order."""
+    """Each task's questions' values from a selection, its rows (selection_rows, or read_rows of a rows artifact) and a
+    reader: {task: [value]}, the questions in the selection's order."""
     _, metrics, tasks = read_selection(selection)
     totals, greedy = read(made_rows)
     answers = [answer for _, answer in made_rows]
     found, at = {}, 0
     for alias, asked in tasks.items():
-        size = sum(len(q["pairs"]) + len(q.get("uncond", [])) for q in asked)
+        per_pair = 2 if metrics[alias] == DIFFERENCE else 1
+        size = sum(len(q["pairs"]) + len(q.get("uncond", [])) for q in asked) * per_pair
         found[alias] = question_values(metrics[alias], asked, totals[at:at + size], greedy[at:at + size],
                                        answers[at:at + size])
         at += size
@@ -434,8 +480,8 @@ def values(selection, read, made_rows):
 
 
 def score(selection, read, made_rows):
-    """Each task's score and each suite's from a selection, its rows (encode_rows of its pairs, or read_rows of a rows
-    artifact) and a reader."""
+    """Each task's score and each suite's from a selection, its rows (selection_rows, or read_rows of a rows artifact)
+    and a reader."""
     groups = json.loads((Path(selection) / "suites.json").read_text())
     scores = {alias: sum(found) / len(found) for alias, found in values(selection, read, made_rows).items()}
     return scores, suite_scores(groups, scores)
