@@ -188,8 +188,9 @@ class MakeTest(unittest.TestCase):
         import gzip
         import json
         local = Path(staging) / path.replace("/", "-")
-        with gzip.open(local, "wt", encoding="utf-8") as file:
-            file.writelines(json.dumps({"text": text}) + "\n" for text in self.files[path])
+        # no time in the file, as Paloma's files are the same each time they are downloaded
+        with gzip.GzipFile(local, "wb", mtime=0) as file:
+            file.write("".join(json.dumps({"text": text}) + "\n" for text in self.files[path]).encode("utf-8"))
         return local
 
     def named(self):
