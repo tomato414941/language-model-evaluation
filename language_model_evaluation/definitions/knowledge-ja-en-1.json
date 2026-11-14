@@ -17,16 +17,16 @@
   "text": "paloma-val-2b60e4850e11cb21"
  },
  "japanese": {
-  "requests": "requests-a5e727ca55d8d813",
+  "requests": "requests-ad12457298e91dc3",
   "suites": [
    "ja:bpb"
   ],
-  "selection": "selection-76a7cdf2b19c4d49"
+  "selection": "selection-312638a4c4f2c35f"
  },
  "japanese_text": {
   "split": "val",
-  "whole": "japanese-text-val-955cabb03efb4186",
-  "text": "japanese-text-val-955cabb03efb4186"
+  "whole": "japanese-text-val-91ab2232e91a7c3c",
+  "text": "japanese-text-val-91ab2232e91a7c3c"
  },
  "overlap": {
   "paloma": {
@@ -36,10 +36,10 @@
   "artifact": "overlap-d319f14ab907c38d",
   "japanese": {
    "text": {
-    "val": "japanese-text-val-955cabb03efb4186",
-    "test": "japanese-text-test-c5b6711e08274ad4"
+    "val": "japanese-text-val-91ab2232e91a7c3c",
+    "test": "japanese-text-test-2126a7b3823737e6"
    },
-   "artifact": "overlap-8ce10e94e145761f"
+   "artifact": "overlap-0f6b410a87495873"
   }
  },
  "categories": {
@@ -220,7 +220,8 @@
   },
   "ja_exams": {
    "japanese": [
-    "jmmlu:rc:bpb::ja"
+    "jmmlu:rc:bpb::ja",
+    "include_ja:rc:bpb::ja"
    ]
   },
   "ja_reading": {
@@ -230,7 +231,8 @@
   },
   "ja_web": {
    "japanese_text": [
-    "mc4_ja"
+    "mc4_ja",
+    "fineweb2_ja"
    ]
   },
   "ja_encyclopedia": {

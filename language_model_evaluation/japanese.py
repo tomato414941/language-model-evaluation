@@ -12,7 +12,9 @@ measure, from each task's own data at a fixed revision:
 - JMMLU: a question and its answer, each subject a task, as OLMES's MMLU, without examples: it has no other split;
 - JEMHopQA, NIILC and AIO (JAQKET): a question and its short answer, after five of another split, as llm-jp-eval
   splits them (NIILC's first answer where it gives several, and none of its questions whose answer is "-");
-- JamC-QA: a question about Japan and its answer of four, after five of its development split.
+- JamC-QA: a question about Japan and its answer of four, after five of its development split;
+- INCLUDE (Japanese): a question of Japan's own exams, for licenses to drive and to practise medicine and for
+  professional certificates, and its answer of four, after five of its validation split.
 
 The tasks are those of llm-jp-eval's categories that a correct answer of a few words can score: commonsense
 reasoning, reading comprehension, examinations and question answering.
@@ -87,6 +89,12 @@ SOURCES = {
     "jmmlu": {"url": HUGGING_FACE, "repository": "nlp-waseda/JMMLU",
               "revision": "3637b25e444ccfdcde4d23a783cbe8e674faa01b", "license": "CC-BY-NC-ND-4.0", "files": {
                   "JMMLU.zip": "3ba7d912943ede44fb7ec06aa1df067ac6bee157e65c5588736b9b983f0e684d"}},
+    "include": {"url": HUGGING_FACE, "repository": "CohereLabs/include-base-44",
+                "revision": "d2e1f6015f67a43c02a9a68db98e2298e2d6a660", "license": "Apache-2.0", "files": {
+                    "Japanese/validation-00000-of-00001.parquet":
+                        "19b03f7dea55a17267d013a184ef48885fd128b3c793dd73deb4ad69096bf6b2",
+                    "Japanese/test-00000-of-00001.parquet":
+                        "7b26cc9198b55ff0ba86babf6095dafba4ed7deab0fbf86509cf02d927e85615"}},
 }
 # Where the sources' files are kept unless another place is named: in the user's cache, as Hugging Face keeps its own.
 RAW = Path.home() / ".cache" / "language-model-evaluation" / "japanese"
@@ -252,6 +260,18 @@ def jamc_qa(raw):
             in map(asked, parquet_rows(fetch("jamc_qa", "v1.0/test-00000-of-00001.parquet", raw)))]
 
 
+def include(raw):
+    def asked(row):
+        choices = [row[f"option_{k}"] for k in "abcd"]
+        return f"{QUESTION}{row['question']}\n{ANSWER}", choices, int(row["answer"]), row["question"]
+
+    validation = [asked(row) for row in
+                  parquet_rows(fetch("include", "Japanese/validation-00000-of-00001.parquet", raw))]
+    before = shots([(context, choices[label]) for context, choices, label, _ in validation], 5, "include")
+    return [chosen(before + context, choices, label, question) for context, choices, label, question
+            in map(asked, parquet_rows(fetch("include", "Japanese/test-00000-of-00001.parquet", raw)))]
+
+
 def requests(asked):
     """A task's requests as OLMES writes them: each question's choices in order, all naming the question."""
     return [{"doc_id": doc_id, "native_id": doc_id, "idx": idx, "label": label, "doc": {"question": question},
@@ -269,7 +289,8 @@ def make(out, raw):
              "jemhopqa:rc:bpb::ja": (jemhopqa(raw), {"split": "dev", "num_shots": 5}),
              "niilc:rc:bpb::ja": (niilc(raw), {"split": "test", "num_shots": 5}),
              "aio:rc:bpb::ja": (aio(raw), {"split": "test", "num_shots": 5}),
-             "jamc_qa:rc:bpb::ja": (jamc_qa(raw), {"split": "test", "num_shots": 5})}
+             "jamc_qa:rc:bpb::ja": (jamc_qa(raw), {"split": "test", "num_shots": 5}),
+             "include_ja:rc:bpb::ja": (include(raw), {"split": "test", "num_shots": 5})}
     subjects = {f"jmmlu_{subject}:rc:bpb::ja": asked for subject, asked in jmmlu(raw).items()}
     tasks |= {alias: (asked, {"split": "test", "num_shots": 0}) for alias, asked in subjects.items()}
     out = Path(out)

@@ -1,14 +1,17 @@
 """Japanese text held out of the corpora it comes from, kept as Paloma keeps its text.
 
 Paloma (paloma.py) measures how well a model reads English text of several kinds, from the validation and test splits
-of public corpora. `fetch` keeps the held-out Japanese text of two public corpora as an artifact of the form of
+of public corpora. `fetch` keeps the held-out Japanese text of three public corpora as an artifact of the form of
 paloma.fetch's (texts/SOURCE/*.jsonl.gz, a document {"text"} a line), so that paloma.part, paloma.rows and the
 overlap test read it unchanged:
 
 - mc4_ja, the web: mC4's Japanese validation split, as AllenAI publishes it (ODC-BY). mC4 has no Japanese test split,
   so its first four files are the validation text and its last four the test text, kept aside;
 - wiki40b_ja, an encyclopedia: Wiki-40B's Japanese validation and test splits, articles of Japanese Wikipedia, with
-  their markers of title, section and paragraph written as the lines of a text.
+  their markers of title, section and paragraph written as the lines of a text;
+- fineweb2_ja, the web: FineWeb-2's Japanese test split, as Hugging Face publishes it (ODC-BY), which is not to be
+  trained on. It is one file, ordered by the crawl that each document comes from, so its documents alternate between
+  the validation text and the test text, each spanning every crawl.
 
 Reading Wiki-40B's files needs pyarrow.
 """
@@ -24,6 +27,7 @@ import olmes_measure
 from .japanese import HUGGING_FACE, fetch as fetch_file
 
 MC4 = "multilingual/c4-ja-validation.tfrecord-{:05d}-of-00008.json.gz"
+FINEWEB2 = "data/jpn_Jpan/test/000_00000.parquet"
 SOURCES = {
     "mc4_ja": {"url": HUGGING_FACE, "repository": "allenai/c4", "revision": "1588ec454efa1a09f29cd18ddd04fe05fc8653a2",
                "license": "ODC-BY", "files": {MC4.format(n): digest for n, digest in enumerate([
@@ -42,10 +46,18 @@ SOURCES = {
                            "7941561557a41410b8e69d804ab7c0e5cb261c5d478dbef02569d2978928b874",
                        "ja/test-00000-of-00001.parquet":
                            "85d1d3945748e5918566d5186b004622d85868a33ac4dcfcccf6627a6b377d6e"}},
+    "fineweb2_ja": {"url": HUGGING_FACE, "repository": "HuggingFaceFW/fineweb-2",
+                    "revision": "af9c13333eb981300149d5ca60a8e9d659b276b9", "license": "ODC-BY",
+                    "files": {FINEWEB2: "94f0f433bdb30d9c0a08c6610c48a2ba157275766a9ae100dbb518ade718bdb4"}},
 }
 # Each split's files of each source.
-SPLITS = {"val": {"mc4_ja": [MC4.format(n) for n in range(4)], "wiki40b_ja": ["ja/validation-00000-of-00001.parquet"]},
-          "test": {"mc4_ja": [MC4.format(n) for n in range(4, 8)], "wiki40b_ja": ["ja/test-00000-of-00001.parquet"]}}
+SPLITS = {"val": {"mc4_ja": [MC4.format(n) for n in range(4)], "wiki40b_ja": ["ja/validation-00000-of-00001.parquet"],
+                  "fineweb2_ja": [FINEWEB2]},
+          "test": {"mc4_ja": [MC4.format(n) for n in range(4, 8)], "wiki40b_ja": ["ja/test-00000-of-00001.parquet"],
+                   "fineweb2_ja": [FINEWEB2]}}
+# The sources whose documents alternate between the splits, in this order: the first document, the third, ... are the
+# first split's.
+ALTERNATE = {"fineweb2_ja": ("val", "test")}
 MARKERS = ("_START_ARTICLE_", "_START_SECTION_", "_START_PARAGRAPH_")
 
 
@@ -69,7 +81,25 @@ def documents(source, path):
         import pyarrow.parquet
 
         for text in pyarrow.parquet.read_table(path, columns=["text"]).column("text").to_pylist():
-            yield article(text)
+            yield article(text) if source == "wiki40b_ja" else text
+
+
+def kept(source, split, texts):
+    """The texts of a source's file that a split keeps: all of them, or every other one of a source in ALTERNATE."""
+    if source not in ALTERNATE:
+        yield from texts
+        return
+    first = ALTERNATE[source].index(split)
+    yield from (text for at, text in enumerate(texts) if at % 2 == first)
+
+
+def described(split):
+    """What a split's artifact says of its sources: each one's repository, revision and files, and which split's turn
+    each of its documents is when they alternate."""
+    return {source: {"repository": SOURCES[source]["repository"], "revision": SOURCES[source]["revision"],
+                     "files": SPLITS[split][source],
+                     **({"alternate": list(ALTERNATE[source])} if source in ALTERNATE else {})}
+            for source in SPLITS[split]}
 
 
 def fetch(out, split, raw):
@@ -83,17 +113,13 @@ def fetch(out, split, raw):
         for number, path in enumerate(paths):
             data = io.BytesIO()
             with gzip.GzipFile(fileobj=data, mode="wb", mtime=0) as file:  # no time in it: the same text, the same file
-                for text in documents(source, fetch_file(source, path, raw, SOURCES)):
+                for text in kept(source, split, documents(source, fetch_file(source, path, raw, SOURCES))):
                     file.write((json.dumps({"text": text}, ensure_ascii=False) + "\n").encode("utf-8"))
             (work / "texts" / source / f"{split}-{number:08d}.jsonl.gz").write_bytes(data.getvalue())
-    sources = {source: {"repository": SOURCES[source]["repository"], "revision": SOURCES[source]["revision"],
-                        "files": SPLITS[split][source]} for source in SPLITS[split]}
-    return olmes_measure.seal(work, f"japanese-text-{split}", language="ja", sources=sources)
+    return olmes_measure.seal(work, f"japanese-text-{split}", language="ja", sources=described(split))
 
 
 def made_here(manifest):
     """Whether an artifact's manifest is of a split that `fetch` makes from the sources at their revisions."""
     split = manifest["kind"].removeprefix("japanese-text-")
-    return split in SPLITS and manifest.get("sources") == {
-        source: {"repository": SOURCES[source]["repository"], "revision": SOURCES[source]["revision"],
-                 "files": SPLITS[split][source]} for source in SPLITS[split]}
+    return split in SPLITS and manifest.get("sources") == described(split)

@@ -41,6 +41,11 @@ def jamc_row(n, answer=1):
             "answer_index": str(answer)}
 
 
+def include_row(n, answer=1):
+    return {"language": "Japanese", "country": "Japan", "subject": "Driving License", "question": f"免許{n}は？",
+            **{f"option_{k}": f"択{n}-{k}" for k in "abcd"}, "answer": answer}
+
+
 def jmmlu_zip(subjects):
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
@@ -84,10 +89,16 @@ class JapaneseTest(unittest.TestCase):
             ("aio", "data/aio_02/aio_01_test.jsonl"): lines([{"question": "クイズは？", "answers": ["正解", "別解"]}]),
             ("jamc_qa", "v1.0/dev-00000-of-00001.parquet"): b"",
             ("jamc_qa", "v1.0/test-00000-of-00001.parquet"): b"",
+            ("include", "Japanese/validation-00000-of-00001.parquet"): b"",
+            ("include", "Japanese/test-00000-of-00001.parquet"): b"",
         }
-        self.jamc = {"dev": [jamc_row(n, 0) for n in range(100, 106)], "test": [jamc_row(1, 2)]}
+        # the rows of each parquet file: by its folder and the split that begins its name
+        self.parquet = {("v1.0", "dev"): [jamc_row(n, 0) for n in range(100, 106)], ("v1.0", "test"): [jamc_row(1, 2)],
+                        ("Japanese", "validation"): [include_row(n, 0) for n in range(100, 106)],
+                        ("Japanese", "test"): [include_row(1, 3)]}
+        rows = lambda path: self.parquet[path.parent.name, path.name.split("-")[0]]
         for patcher in (mock.patch.object(japanese, "fetch", self.fetch),
-                        mock.patch.object(japanese, "parquet_rows", lambda path: self.jamc[path.name.split("-")[0]])):
+                        mock.patch.object(japanese, "parquet_rows", rows)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -155,6 +166,12 @@ class JapaneseTest(unittest.TestCase):
         self.assertTrue(contexts[0].endswith("\n\n質問：日本の1は？\n回答："))
         self.assertEqual(contexts[0].count("質問："), 6)
 
+    def test_asks_an_include_question_of_each_of_its_four_answers_after_five_of_its_validation_split(self):
+        [(contexts, continuations, label, question)] = japanese.include(self.directory)
+        self.assertEqual((continuations, label, question), ([f"択1-{k}" for k in "abcd"], 3, "免許1は？"))
+        self.assertTrue(contexts[0].endswith("\n\n質問：免許1は？\n回答："))
+        self.assertEqual(contexts[0].count("質問："), 6)
+
     def test_asks_each_jmmlu_subject_by_itself_without_examples(self):
         subjects = japanese.jmmlu(self.directory)
         self.assertEqual(sorted(subjects), ["history", "physics"])
@@ -163,9 +180,10 @@ class JapaneseTest(unittest.TestCase):
     def test_makes_an_artifact_whose_selection_reads_each_questions_correct_answer(self):
         artifact = japanese.make(self.directory / "out", self.directory)
         suites = json.loads((artifact / "suites.json").read_text())
-        self.assertEqual(suites["ja:bpb"], ["aio:rc:bpb::ja", "jamc_qa:rc:bpb::ja", "jcommonsenseqa:rc:bpb::ja",
-                                            "jemhopqa:rc:bpb::ja", "jsquad:rc:bpb::ja", "kuci:rc:bpb::ja",
-                                            "niilc:rc:bpb::ja", "xwinograd_ja:rc:bpb::ja", "jmmlu:rc:bpb::ja"])
+        self.assertEqual(suites["ja:bpb"], ["aio:rc:bpb::ja", "include_ja:rc:bpb::ja", "jamc_qa:rc:bpb::ja",
+                                            "jcommonsenseqa:rc:bpb::ja", "jemhopqa:rc:bpb::ja", "jsquad:rc:bpb::ja",
+                                            "kuci:rc:bpb::ja", "niilc:rc:bpb::ja", "xwinograd_ja:rc:bpb::ja",
+                                            "jmmlu:rc:bpb::ja"])
         self.assertEqual(suites["jmmlu:rc:bpb::ja"], ["jmmlu_history:rc:bpb::ja", "jmmlu_physics:rc:bpb::ja"])
         selection = om.select(artifact, self.directory / "out", ["ja:bpb"])
         _, metrics, tasks = om.read_selection(selection)
@@ -175,7 +193,8 @@ class JapaneseTest(unittest.TestCase):
                                    "kuci:rc:bpb::ja": ["続き1c"], "xwinograd_ja:rc:bpb::ja": ["は速かった。"],
                                    "jmmlu_history:rc:bpb::ja": ["三"], "jmmlu_physics:rc:bpb::ja": ["甲"],
                                    "jemhopqa:rc:bpb::ja": ["甲"], "niilc:rc:bpb::ja": ["東芝", "一"],
-                                   "aio:rc:bpb::ja": ["正解"], "jamc_qa:rc:bpb::ja": ["選1-2"]})
+                                   "aio:rc:bpb::ja": ["正解"], "jamc_qa:rc:bpb::ja": ["選1-2"],
+                                   "include_ja:rc:bpb::ja": ["択1-d"]})
         self.assertEqual(tasks["xwinograd_ja:rc:bpb::ja"][0]["pairs"][0][0], "犬は猫を追った。猫")
 
     def test_makes_the_same_artifact_from_the_same_files(self):
@@ -231,6 +250,19 @@ class TextTest(unittest.TestCase):
         # the same text, the same artifact
         self.assertEqual(japanese_text.fetch(self.directory / "again", "val", self.directory / "raw").name,
                          artifact.name)
+
+    def test_gives_every_other_document_of_an_alternating_source_to_each_split_in_turn(self):
+        texts = [f"{n}番目の文書。" for n in range(5)]
+        splits = {split: {"fineweb2_ja": ["one.parquet"]} for split in ("val", "test")}
+        with mock.patch.object(japanese_text, "SPLITS", splits), \
+                mock.patch.object(japanese_text, "documents", lambda source, path: iter(texts)), \
+                mock.patch.object(japanese_text, "fetch_file", lambda source, path, raw, sources: path):
+            found = {split: japanese_text.fetch(self.directory / split, split, self.directory / "raw")
+                     for split in ("val", "test")}
+            self.assertTrue(all(japanese_text.made_here(om.check(artifact)) for artifact in found.values()))
+        read = {split: list(paloma.documents(paloma.files(artifact)["fineweb2_ja", "fineweb2_ja"]))
+                for split, artifact in found.items()}
+        self.assertEqual(read, {"val": texts[0::2], "test": texts[1::2]})
 
     def test_finds_the_documents_that_hold_a_japanese_question_or_a_stretch_of_the_japanese_text(self):
         question = "次のうち、地上の観測者から見て正午に空が青く見える理由を最もよく説明しているものはどれですか。"
