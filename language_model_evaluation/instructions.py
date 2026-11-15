@@ -84,6 +84,9 @@ def evaluated(asked, replies, directory, home, python):
     """The authors' results of each level for replies ({prompt: reply}) to prompts (as `prompts` gives them)."""
     if set(replies) != {row["prompt"] for row in asked}:
         raise ValueError("the replies do not answer each of the prompts once")
+    # The authors' code runs in its checkout, where paths relative to this process's directory would name nothing.
+    # The environment's Python stays the link that it is, by which it finds the environment's packages.
+    directory, python = Path(directory).absolute(), Path(python).absolute()
     # Each instruction's id names its language ("ja:..."), by which the authors' code picks its checks.
     write_lines(directory / "input.jsonl", asked)
     write_lines(directory / "responses.jsonl", [{"prompt": row["prompt"], "response": replies[row["prompt"]]}

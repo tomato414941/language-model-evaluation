@@ -1,4 +1,6 @@
 import json
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +32,36 @@ class PromptsTest(unittest.TestCase):
         asked = instructions.prompts("ja", self.home)
         with self.assertRaisesRegex(ValueError, "each of the prompts once"):
             instructions.evaluated(asked, {"雪について書いてください。": "雪。"}, self.home / "out", self.home, None)
+
+    def test_runs_the_authors_code_in_its_checkout_with_paths_relative_to_this_directory(self):
+        # A checkout whose code writes that every reply follows its instructions, with the modules it imports.
+        (self.home / "code" / "data").mkdir(parents=True)
+        (self.home / "code" / "data" / "ja_input_data.jsonl").write_text(
+            (self.home / "data" / "ja_input_data.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
+        (self.home / "code" / "absl").mkdir()
+        (self.home / "code" / "absl" / "__init__.py").write_text("")
+        (self.home / "code" / "absl" / "app.py").write_text("import sys\n\ndef run(main):\n    main(sys.argv)\n")
+        (self.home / "code" / "langdetect.py").write_text("class DetectorFactory:\n    seed = None\n")
+        (self.home / "code" / "evaluation_main.py").write_text(
+            "import json, pathlib\n\n"
+            "def main(argv):\n"
+            "    flags = dict(arg[2:].split('=', 1) for arg in argv[1:])\n"
+            "    rows = [json.loads(line) for line in open(flags['input_response_data'], encoding='utf-8')]\n"
+            "    for level in ('strict', 'loose'):\n"
+            "        with open(pathlib.Path(flags['output_dir']) / f'eval_results_{level}.jsonl', 'w') as out:\n"
+            "            out.writelines(json.dumps({'prompt': row['prompt'], 'follow_all_instructions': True}) + '\\n'\n"
+            "                           for row in rows)\n")
+        (self.home / "environment" / "bin").mkdir(parents=True)
+        (self.home / "environment" / "bin" / "python").symlink_to(sys.executable)
+        before = os.getcwd()
+        os.chdir(self.home)
+        self.addCleanup(os.chdir, before)
+        asked = instructions.prompts("ja", Path("code"))
+        replies = {row["prompt"]: "雨。" for row in asked}
+        results = instructions.evaluated(asked, replies, Path("scored") / "ja", Path("code"),
+                                         Path("environment") / "bin" / "python")
+        self.assertEqual([row["follow_all_instructions"] for row in results["strict"]], [True, True])
+        self.assertTrue((self.home / "scored" / "ja" / "eval_results_loose.jsonl").exists())
 
     def test_asks_a_prompt_as_its_reply_was_asked_when_that_says_lines_for_sentences(self):
         asked = instructions.prompts("ja", self.home)
