@@ -46,6 +46,17 @@ class TwoLanguagesTest(unittest.TestCase):
         self.assertEqual(both["compare"], "mean_rate_by_language")
         self.assertEqual(list(definition.members(both, "japanese_text")), ["ja_web", "ja_encyclopedia"])
 
+    def test_knowledge_ja_en_part_cuts_the_questions_and_the_text_of_both_languages_alike(self):
+        whole, part = definition.load("knowledge-ja-en-1"), definition.load("knowledge-ja-en-part-1")
+        self.assertEqual(part["within"], "knowledge-ja-en-1")
+        for key in ("categories", "languages", "compare", "overlap"):
+            self.assertEqual(part[key], whole[key])
+        self.assertEqual((part["olmes"]["per_task"], part["japanese"]["per_task"]), (3000, 3000))
+        self.assertEqual(part["paloma"]["part"], part["japanese_text"]["part"])
+        for section in ("paloma", "japanese_text"):
+            self.assertEqual(part[section]["whole"], whole[section]["text"])  # the text that the part is cut from
+            self.assertNotEqual(part[section]["text"], whole[section]["text"])
+
 
 class ScoresTest(unittest.TestCase):
     def test_a_category_that_is_answered_is_the_mean_of_its_tasks_groups_and_named_means(self):

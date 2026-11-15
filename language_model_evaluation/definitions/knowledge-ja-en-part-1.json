@@ -1,0 +1,29 @@
+{
+ "within": "knowledge-ja-en-1",
+ "olmes": {
+  "per_task": 3000,
+  "seed": 0,
+  "selection": "selection-9cdff53494774752"
+ },
+ "japanese": {
+  "per_task": 3000,
+  "seed": 0,
+  "selection": "selection-662ede83fcba6a33"
+ },
+ "paloma": {
+  "part": {
+   "member_bytes": 1000000,
+   "domain_bytes": 0,
+   "document_bytes": 1000000
+  },
+  "text": "paloma-val-sample-01f15c2480a33a3e"
+ },
+ "japanese_text": {
+  "part": {
+   "member_bytes": 1000000,
+   "domain_bytes": 0,
+   "document_bytes": 1000000
+  },
+  "text": "japanese-text-val-sample-d682924beb8bb7f1"
+ }
+}
