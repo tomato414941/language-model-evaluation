@@ -1,0 +1,19 @@
+{
+ "flores": {
+  "repository": "openlanguagedata/flores_plus",
+  "revision": "1147e2dc59f37fbb5c22fd8478770de02cd399f9",
+  "split": "devtest",
+  "text": "flores-devtest-8faeff63f8158ffb"
+ },
+ "overlap": {
+  "flores": {
+   "dev": "flores-dev-5af822a11814e814",
+   "devtest": "flores-devtest-8faeff63f8158ffb"
+  },
+  "artifact": "overlap-d9012e76d3c064d1"
+ },
+ "balance": [
+  "jpn_Jpan",
+  "eng_Latn"
+ ]
+}

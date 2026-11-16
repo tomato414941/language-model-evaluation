@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 import olmes_measure as om
-from language_model_evaluation import definition, overlap, paloma
+from language_model_evaluation import definition, flores, overlap, paloma
 from test_olmes_measure import make_requests, request
 from test_paloma import CATEGORIES, fetched, members_files
 
@@ -179,6 +179,50 @@ class ComparedTest(unittest.TestCase):
         for other in (fewer, larger, {"questions": ITEMS["questions"]}):
             with self.assertRaisesRegex(ValueError, "same items"):
                 definition.compared(TOY, other, ITEMS, GROUPS)
+
+
+# A balance of the same sentences in two languages, the first's bits over the second's.
+BALANCE = {"name": "toy-balance", "balance": ["ja", "en"]}
+
+
+class BalanceTest(unittest.TestCase):
+    def test_balance_ja_en_reads_flores_devtest_in_japanese_over_english_and_keeps_both_splits_out_of_training(self):
+        chosen = definition.load("balance-ja-en-1")
+        self.assertEqual((chosen["flores"]["repository"], chosen["flores"]["revision"]),
+                         (flores.REPOSITORY, flores.REVISION))
+        self.assertEqual((chosen["flores"]["split"], chosen["balance"]), ("devtest", ["jpn_Jpan", "eng_Latn"]))
+        self.assertEqual(chosen["overlap"]["flores"], {"dev": chosen["overlap"]["flores"]["dev"],
+                                                       "devtest": chosen["flores"]["text"]})
+
+    def test_a_balance_is_the_bits_of_the_first_languages_sentences_over_the_seconds(self):
+        self.assertEqual(definition.balance(BALANCE, {"ja": [3.0, 6.0], "en": [2.0, 6.0]})["balance"], 9.0 / 8.0)
+        with self.assertRaisesRegex(ValueError, "same sentences"):
+            definition.balance(BALANCE, {"ja": [3.0], "en": [2.0, 6.0]})
+
+    def test_a_sentence_is_drawn_the_same_in_both_languages(self):
+        # every Japanese sentence takes one and a half times the bits of its English one, whichever are drawn
+        steady = definition.balance(BALANCE, {"ja": [3.0, 9.0, 1.5, 6.0], "en": [2.0, 6.0, 1.0, 4.0]})
+        self.assertAlmostEqual(steady["balance"], 1.5)
+        self.assertLess(steady["standard_error"], 1e-12)
+        varied = definition.balance(BALANCE, {"ja": [3.0, 6.0, 1.0, 8.0] * 100, "en": [2.0, 6.0, 1.0, 4.0] * 100})
+        self.assertGreater(varied["standard_error"], 0)
+        self.assertEqual(definition.balance(BALANCE, {"ja": [3.0, 6.0, 1.0, 8.0] * 100,
+                                                      "en": [2.0, 6.0, 1.0, 4.0] * 100}), varied)
+
+    def test_two_balances_differ_by_what_varies_with_the_sentences_and_not_by_what_the_models_share(self):
+        standing = {"ja": [3.0, 6.0, 1.0, 8.0] * 100, "en": [2.0, 6.0, 1.0, 4.0] * 100}
+        halved = {language: [bits / 2 for bits in found] for language, found in standing.items()}
+        found = definition.balance_compared(BALANCE, halved, standing)
+        self.assertAlmostEqual(found["difference"], 0)  # half the bits in both languages, the same balance
+        self.assertLess(found["standard_error"], 1e-12)
+        dearer = {"ja": [bits * 1.1 for bits in standing["ja"]], "en": standing["en"]}
+        found = definition.balance_compared(BALANCE, dearer, standing)
+        balance = definition.balance(BALANCE, standing)
+        self.assertAlmostEqual(found["difference"], 0.1 * balance["balance"])
+        # with the sentences drawn, the difference varies a tenth as much as the balance does
+        self.assertAlmostEqual(found["standard_error"], 0.1 * balance["standard_error"], delta=1e-3)
+        with self.assertRaisesRegex(ValueError, "same sentences"):
+            definition.balance_compared(BALANCE, {"ja": [3.0], "en": [2.0]}, standing)
 
 
 class MakeTest(unittest.TestCase):

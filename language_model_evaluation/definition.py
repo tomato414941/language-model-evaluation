@@ -15,20 +15,27 @@ A definition (definitions/NAME.json) says
   by the mean of each language's; a score improves as it falls (bits per byte) unless the definition says that a
   higher one is `better`, as the share of prompts whose instructions a model follows (instructions.py, `followed`).
 
+A definition of a balance (`balance`: two languages) measures instead the same sentences in both, FLORES+'s (`flores`:
+flores.fetch's split), with the text that nothing measured by it may learn under `overlap` (flores.make_overlap: both
+splits whole). A model's balance is the bits that it takes to read the sentences in the first language over those
+that it takes in the second, and two models' balances compare by their difference (`balance_compared`).
+
 A comparison's standard errors (`compared`) come from two measurements item by item, each question's value, each
 document's bits and each prompt's result (`scored` makes the categories of one): how much the comparison varies as
-the items measured are drawn again.
+the items measured are drawn again. A balance's come from each sentence's bits in each language, the sentences drawn
+again the same in both.
 
 A definition is not edited once a result names it: a change is a new name. One that is `within` another measures a
 part of the other's data and says only what differs, so that the two agree on everything else and a result by the
 larger one can be compared on the part: OLMES's questions by olmes_measure.within, Paloma's text by reading the part.
 
-    python -m language_model_evaluation.definition make NAME OUT REQUESTS   # the definition's artifacts, in OUT
+    python -m language_model_evaluation.definition make NAME OUT [REQUESTS]   # the definition's artifacts, in OUT
     python -m language_model_evaluation.definition show NAME
 
-`make` builds what OUT does not hold yet and checks every name against the definition's; fetching Paloma needs
-HF_TOKEN (paloma.py). `make_japanese` builds the Japanese artifacts alone, from the files of japanese.py's and
-japanese_text.py's sources.
+`make` builds what OUT does not hold yet and checks every name against the definition's, from OLMES's requests
+(REQUESTS) for a definition of questions; fetching Paloma and FLORES+ needs HF_TOKEN (paloma.py, flores.py).
+`make_japanese` builds the Japanese artifacts alone, from the files of japanese.py's and japanese_text.py's sources,
+and `make_flores` FLORES+'s.
 """
 import argparse
 import json
@@ -37,7 +44,7 @@ from pathlib import Path
 import numpy as np
 import olmes_measure
 
-from . import japanese, japanese_text, overlap, paloma
+from . import flores, japanese, japanese_text, overlap, paloma
 
 DEFINITIONS = Path(__file__).parent / "definitions"
 
@@ -130,6 +137,18 @@ def make_japanese(name, out, raw=japanese.RAW):
         aside = definition["overlap"]["japanese"]
         splits = [have(artifact, fetch(split)) for split, artifact in aside["text"].items()]
         have(aside["artifact"], lambda: overlap.make(out, requests, splits))
+    return made
+
+
+def make_flores(name, out, download=flores.download):
+    """Every artifact of FLORES+ that a definition of a balance names, in the directory `out`: {name: its
+    directory}, as `make` checks and keeps them."""
+    definition, out, made = load(name) if isinstance(name, str) else name, Path(out), {}
+    have = lambda expected, build: _have(out, made, definition["name"], expected, build)
+    fetch = lambda split: lambda: flores.fetch(out, split, download)
+    have(definition["flores"]["text"], fetch(definition["flores"]["split"]))
+    splits = [have(artifact, fetch(split)) for split, artifact in definition["overlap"]["flores"].items()]
+    have(definition["overlap"]["artifact"], lambda: flores.make_overlap(out, splits))
     return made
 
 
@@ -311,18 +330,56 @@ def compared(definition, items, standing, groups=None, draws=1000, seed=0):
                 for category, rate in rates(definition, *measured).items()}}
 
 
+def _sentences(definition, bits):
+    """Each sentence's bits in the two languages of a balance ({language: [bits]}), as arrays in the definition's
+    order of them."""
+    found = [np.array(bits[language], dtype=float) for language in definition["balance"]]
+    if len(found[0]) != len(found[1]):
+        raise ValueError("the two languages do not hold the same sentences")
+    return found
+
+
+def balance(definition, bits, draws=1000, seed=0):
+    """A model's balance by a definition of the same sentences in two languages, from each sentence's bits
+    ({language: [bits]}, the sentences in the same order in both): the bits that it takes to read the sentences in the
+    first of the definition's two languages over those that it takes in the second, above 1 when the first costs it
+    more for the same content. Its standard error is over `draws` resamples of the sentences, each drawn again as many
+    times as there are sentences, with replacement and the same in both languages: how much the balance varies with
+    which sentences happen to be measured."""
+    first, second = _sentences(definition, bits)
+    drawn = _resampled(np.random.default_rng(seed), (first, second), draws)
+    return {"balance": float(first.sum() / second.sum()), "standard_error": float(np.std(drawn[0] / drawn[1], ddof=1))}
+
+
+def balance_compared(definition, bits, standing, draws=1000, seed=0):
+    """How a model's balance differs from another's, measured on the same sentences (`bits` and `standing`, as
+    `balance` takes them): its balance less the other's, with the standard error of that difference over `draws`
+    resamples of the sentences, drawn the same in both languages and for both models, so that it is of how the
+    difference varies with which sentences happen to be measured, and not with what the models share."""
+    ours, theirs = _sentences(definition, bits), _sentences(definition, standing)
+    if len(ours[0]) != len(theirs[0]):
+        raise ValueError("the measurements are not of the same sentences")
+    differ = lambda first, second, other_first, other_second: first / second - other_first / other_second
+    drawn = _resampled(np.random.default_rng(seed), (*ours, *theirs), draws)
+    return {"difference": float(differ(*(column.sum() for column in (*ours, *theirs)))),
+            "standard_error": float(np.std(differ(*drawn), ddof=1))}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     made = commands.add_parser("make")
     made.add_argument("name")
     made.add_argument("out")
-    made.add_argument("requests")
+    made.add_argument("requests", nargs="?")
     shown = commands.add_parser("show")
     shown.add_argument("name")
     args = parser.parse_args()
     if args.command == "make":
-        for artifact in make(args.name, args.out, args.requests):
+        chosen = load(args.name)
+        if "flores" not in chosen and args.requests is None:
+            parser.error(f"{args.name} is made from OLMES's requests")
+        for artifact in make_flores(chosen, args.out) if "flores" in chosen else make(chosen, args.out, args.requests):
             print(artifact)
     else:
         print(json.dumps(load(args.name), indent=1, ensure_ascii=False))
