@@ -25,9 +25,9 @@ document's bits and each prompt's result (`scored` makes the categories of one):
 the items measured are drawn again. A balance's come from each sentence's bits in each language, the sentences drawn
 again the same in both.
 
-A definition is not edited once a result names it: a change is a new name. One that is `within` another measures a
-part of the other's data and says only what differs, so that the two agree on everything else and a result by the
-larger one can be compared on the part: OLMES's questions by olmes_measure.within, Paloma's text by reading the part.
+A definition that is `within` another measures a part of the other's data and says only what differs, so that the
+two agree on everything else and a result by the larger one can be compared on the part: OLMES's questions by
+olmes_measure.within, Paloma's text by reading the part.
 
     python -m language_model_evaluation.definition make NAME OUT [REQUESTS]   # the definition's artifacts, in OUT
     python -m language_model_evaluation.definition show NAME

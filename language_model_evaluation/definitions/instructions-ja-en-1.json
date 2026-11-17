@@ -1,7 +1,9 @@
 {
  "instructions": {
-  "repository": "lightblue-tech/M-IFEval",
-  "commit": "10b874dbf8c4ca25ed5d876e1d3226e7f3f9d0dc",
+  "repository": "CONE-MT/BenchMAX",
+  "commit": "03cfd656c1b0b93647b5dabf5a11ce9be362493c",
+  "data": "LLaMAX/BenchMAX_Rule-based",
+  "revision": "36a659fc9dddc2b344d98971ea0643527a3658d1",
   "level": "strict",
   "max_new_tokens": 2048
  },
