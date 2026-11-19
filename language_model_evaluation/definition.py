@@ -10,10 +10,14 @@ A definition (definitions/NAME.json) says
 - the text that nothing measured by it may learn (overlap.make: every question of the requests, Paloma's splits
   whole), by the artifact's name, and the Japanese questions' and text's under `japanese`;
 - the categories that a result is divided into, each the mean of its members: OLMES's or the Japanese tasks and
-  groups, a named mean of some tasks, or the sources and domains of Paloma's or the Japanese text; and
-- how two results compare (`improvement`): by the mean of the categories' rates of improvement, or with `languages`
-  by the mean of each language's; a score improves as it falls (bits per byte) unless the definition says that a
-  higher one is `better`, as the share of prompts whose instructions a model follows (instructions.py, `followed`).
+  groups, a named mean of some tasks, or the sources and domains of Paloma's or the Japanese text; or, under
+  `paloma_aggregate`, the bits per byte of all of Paloma's text, the domains weighed by their bytes in the split
+  whole (definitions/bytes, paloma.domain_bytes), as Paloma's own aggregate weighs them; and
+- how two results compare (`improvement`): by the mean of the categories' rates of improvement, with `languages` by
+  the mean of each language's, or by their mean weighted by the definition's `weights`, in which a category of
+  weight 0 is shown and decides nothing; a score improves as it falls (bits per byte) unless the definition says
+  that a higher one is `better`, as the share of prompts whose instructions a model follows (instructions.py,
+  `followed`).
 
 A definition of a balance (`balance`: two languages) measures instead the same sentences in both, FLORES+'s (`flores`:
 flores.fetch's split), with the text that nothing measured by it may learn under `overlap` (flores.make_overlap: both
@@ -31,6 +35,7 @@ olmes_measure.within, Paloma's text by reading the part.
 
     python -m language_model_evaluation.definition make NAME OUT [REQUESTS]   # the definition's artifacts, in OUT
     python -m language_model_evaluation.definition show NAME
+    python -m language_model_evaluation.definition bytes ARTIFACT   # a split whole's domains' bytes, as definitions/bytes
 
 `make` builds what OUT does not hold yet and checks every name against the definition's, from OLMES's requests
 (REQUESTS) for a definition of questions; fetching Paloma and FLORES+ needs HF_TOKEN (paloma.py, flores.py).
@@ -47,19 +52,32 @@ import olmes_measure
 from . import flores, japanese, japanese_text, overlap, paloma
 
 DEFINITIONS = Path(__file__).parent / "definitions"
+AGGREGATE = "paloma_aggregate"  # a category of all of Paloma's text, the domains weighed by their bytes
 
 
 def load(name):
-    """The definition of a name, with what it takes from the one that it is within."""
+    """The definition of a name, with what it takes from the one that it is within, and, if a category is Paloma's
+    aggregate, the bytes of each domain of each split whole that it reads (`domain_bytes`: {artifact: {domain:
+    bytes}})."""
     own = json.loads((DEFINITIONS / f"{name}.json").read_text(encoding="utf-8"))
     if "within" not in own:
-        return {"name": name, **own}
-    whole = load(own["within"])
-    merged = {**whole, **own, "name": name}
-    for section in ("olmes", "paloma", "japanese", "japanese_text", "instructions"):
-        if section in whole:
-            merged[section] = {**whole[section], **own.get(section, {})}
+        merged = {"name": name, **own}
+    else:
+        whole = load(own["within"])
+        merged = {**whole, **own, "name": name}
+        for section in ("olmes", "paloma", "japanese", "japanese_text", "instructions"):
+            if section in whole:
+                merged[section] = {**whole[section], **own.get(section, {})}
+    if any(AGGREGATE in parts for parts in merged.get("categories", {}).values()):
+        merged["domain_bytes"] = {artifact: json.loads((DEFINITIONS / "bytes" / f"{artifact}.json").read_text())
+                                  for artifact in _wholes(merged)}
     return merged
+
+
+def _wholes(definition):
+    """The split wholes of Paloma's text that a definition reads a part of, or all of: its own and its reserve's."""
+    text = definition["paloma"]
+    return [text["whole"]] + ([text["reserve"]["whole"]] if "reserve" in text else [])
 
 
 def members(definition, source="paloma"):
@@ -106,6 +124,9 @@ def make(name, out, requests, download=paloma.download, listed=paloma.listed):
         have(aside["text"], lambda: paloma.part(other, out, kinds, **text["part"]))
     splits = [have(artifact, fetch(split)) for split, artifact in definition["overlap"]["paloma"].items()]
     have(definition["overlap"]["artifact"], lambda: overlap.make(out, requests, splits))
+    for artifact, sizes in definition.get("domain_bytes", {}).items():
+        if paloma.domain_bytes(made[artifact]) != sizes:
+            raise ValueError(f"{name}'s bytes of {artifact} are not the artifact's")
     return {**made, **make_japanese(definition, out)}
 
 
@@ -207,7 +228,31 @@ def read(definition, domains, partial=False):
         if not found:
             raise ValueError(f"no member of {category} is scored")
         scores[category] = sum(found) / len(found)
+    for category, parts in definition["categories"].items():
+        if AGGREGATE in parts:
+            scores[category] = _aggregate(definition, domains, partial)
     return scores
+
+
+def _aggregate(definition, domains, partial):
+    """The bits per byte of all of Paloma's text from its domains' ({SOURCE/DOMAIN: BPB}): their mean weighed by each
+    domain's bytes in the split whole, which a part of it estimates. A `partial` text is the reserve's, of the
+    reserve's split, and its domains are those that it holds."""
+    text = definition["paloma"]
+    split = text["reserve"]["whole"] if partial and "reserve" in text else text["whole"]
+    sizes = definition["domain_bytes"][split]
+    sources = {name.partition("/")[0] for names in members(definition).values() for name in names}
+    stray = sorted(key for key in domains if key.partition("/")[0] in sources and key not in sizes)
+    if stray:
+        raise ValueError(f"{stray[0]} is no domain of {split}")
+    found = {key: bits for key, bits in domains.items() if key in sizes}
+    missing = sorted(key for key in sizes if key not in found and sizes[key])
+    if missing and not partial:
+        raise ValueError(f"no score of {missing[0]}")
+    total = sum(sizes[key] for key in found)
+    if not total:
+        raise ValueError("no domain of Paloma's text is scored")
+    return sum(sizes[key] * bits for key, bits in found.items()) / total
 
 
 def followed(definition, shares):
@@ -233,12 +278,19 @@ def rates(definition, scores, standing):
 
 def improvement(definition, scores, standing):
     """By how much `scores` improve on `standing` ({category: score}, of every category), from the categories' `rates`:
-    under the rule `mean_rate`, their mean, each counting equally; under `mean_rate_by_language`, the mean of each
-    language's mean of its categories' (`languages`: {language: [category]}), so that each language counts equally
-    however many categories it has. Positive: `scores` are the better."""
+    under the rule `mean_rate`, their mean, each counting equally; under `weighted_mean_rate`, their mean weighted by
+    the definition's `weights` ({category: weight}), in which a category of weight 0 decides nothing; under
+    `mean_rate_by_language`, the mean of each language's mean of its categories' (`languages`: {language:
+    [category]}), so that each language counts equally however many categories it has. Positive: `scores` are the
+    better."""
     found = rates(definition, scores, standing)
     if definition["compare"] == "mean_rate":
         return _mean(found.values())
+    if definition["compare"] == "weighted_mean_rate":
+        weights = definition["weights"]
+        if sorted(weights) != sorted(categories(definition)):
+            raise ValueError("the weights are not of every category once")
+        return sum(weights[category] * rate for category, rate in found.items()) / sum(weights.values())
     if definition["compare"] == "mean_rate_by_language":
         languages = definition["languages"]
         if sorted(c for names in languages.values() for c in names) != sorted(categories(definition)):
@@ -374,7 +426,13 @@ def main():
     made.add_argument("requests", nargs="?")
     shown = commands.add_parser("show")
     shown.add_argument("name")
+    sized = commands.add_parser("bytes", help="the bytes of each domain of a Paloma artifact, as definitions/bytes")
+    sized.add_argument("artifact")
     args = parser.parse_args()
+    if args.command == "bytes":
+        olmes_measure.check(args.artifact)
+        print(json.dumps(paloma.domain_bytes(args.artifact), indent=0, sort_keys=True))
+        return
     if args.command == "make":
         chosen = load(args.name)
         if "flores" not in chosen and args.requests is None:

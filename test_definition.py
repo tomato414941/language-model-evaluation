@@ -125,6 +125,73 @@ class ScoresTest(unittest.TestCase):
             definition.improvement(dict(TOY, compare="other"), candidate, standing)
 
 
+# TOY with Paloma's aggregate beside its kinds of text, weighed by the bytes of the domains of two splits, and its
+# result compared by its categories' rates weighted.
+AGGREGATED = {**TOY, "categories": {**TOY["categories"], "text": {"paloma_aggregate": "bytes"}},
+              "paloma": {"whole": "paloma-val-0", "reserve": {"whole": "paloma-test-0"}},
+              "domain_bytes": {"paloma-val-0": {"c4_en/c4_en": 100, "c4_100_domains/1_a": 300, "c4_100_domains/2_b": 100,
+                                                "dolma-v1_5/common-crawl": 500, "dolma-v1_5/books": 1000},
+                               "paloma-test-0": {"c4_en/c4_en": 200, "c4_100_domains/1_a": 100, "c4_100_domains/2_b": 100,
+                                                 "dolma-v1_5/common-crawl": 100, "dolma-v1_5/books": 600}},
+              "compare": "weighted_mean_rate", "weights": {"science": 1, "sums": 1, "web": 0, "books": 0, "text": 2}}
+
+
+class AggregateTest(unittest.TestCase):
+    def test_knowledge_en_2_reads_what_knowledge_en_1_reads_and_weighs_paloma_aggregate_as_all_the_answers(self):
+        old, new = definition.load("knowledge-en-1"), definition.load("knowledge-en-2")
+        for section in ("olmes", "paloma", "overlap"):
+            self.assertEqual(new[section], old[section])
+        self.assertEqual(definition.members(new), definition.members(old))  # the same artifacts serve both
+        self.assertEqual(definition.categories(new), definition.categories(old) + ("text",))
+        weights, answered = new["weights"], [c for c, parts in new["categories"].items() if "olmes" in parts]
+        self.assertEqual({weights[category] for category in answered}, {1})
+        self.assertEqual(weights["text"], len(answered))
+        self.assertEqual({weights[category] for category in definition.members(new)}, {0})  # shown alone
+        old_part, new_part = definition.load("knowledge-en-part-1"), definition.load("knowledge-en-part-2")
+        self.assertEqual(new_part["within"], "knowledge-en-2")
+        for section in ("olmes", "paloma"):
+            self.assertEqual(new_part[section], old_part[section])
+
+    def test_the_bytes_of_each_split_whole_hold_every_member_of_the_text_and_nothing_else(self):
+        found = definition.load("knowledge-en-part-2")
+        text = found["paloma"]
+        self.assertEqual(set(found["domain_bytes"]), {text["whole"], text["reserve"]["whole"]})
+        names = [name for names in definition.members(found).values() for name in names]
+        held = lambda key, name: (key.partition("/")[0] == name.partition("/")[0]
+                                  and name.partition("/")[2] in ("", key.partition("/")[2]))
+        for artifact, sizes in found["domain_bytes"].items():
+            for name in names:
+                self.assertTrue(any(held(key, name) and size for key, size in sizes.items()) or
+                                name == "dolma-v1_5/books" and artifact == text["reserve"]["whole"], (artifact, name))
+            self.assertTrue(all(any(held(key, name) for name in names) for key in sizes), artifact)
+
+    def test_paloma_aggregate_is_the_bits_of_all_of_the_text_over_its_bytes(self):
+        domains = {"c4_en/c4_en": 1.0, "c4_100_domains/1_a": 2.0, "c4_100_domains/2_b": 4.0,
+                   "dolma-v1_5/common-crawl": 5.0, "dolma-v1_5/books": 7.0}
+        sizes = AGGREGATED["domain_bytes"]["paloma-val-0"]
+        found = definition.read(AGGREGATED, domains)
+        self.assertAlmostEqual(found["text"], sum(sizes[key] * bits for key, bits in domains.items()) / 2000)
+        self.assertEqual(found["web"], (1.0 + 3.0 + 5.0) / 3)  # the kinds of text are the means of their members still
+        with self.assertRaisesRegex(ValueError, "c4_100_domains/3_c is no domain"):
+            definition.read(AGGREGATED, {**domains, "c4_100_domains/3_c": 1.0})
+
+    def test_a_reserves_aggregate_weighs_the_domains_that_it_holds_by_the_bytes_of_its_own_split(self):
+        held = {"c4_en/c4_en": 1.0, "c4_100_domains/1_a": 2.0, "dolma-v1_5/common-crawl": 5.0, "dolma-v1_5/books": 7.0}
+        sizes = AGGREGATED["domain_bytes"]["paloma-test-0"]
+        found = definition.read(AGGREGATED, held, partial=True)
+        self.assertAlmostEqual(found["text"], (200 * 1.0 + 100 * 2.0 + 100 * 5.0 + 600 * 7.0) / 1000)
+        self.assertEqual(sum(sizes.values()) - sizes["c4_100_domains/2_b"], 1000)
+
+    def test_one_result_improves_on_another_by_the_categories_rates_weighted_as_the_definition_weighs_them(self):
+        standing = {category: 2.0 for category in definition.categories(AGGREGATED)}
+        self.assertAlmostEqual(definition.improvement(AGGREGATED, dict(standing, text=1.0), standing), 2 * 0.5 / 4)
+        self.assertAlmostEqual(definition.improvement(AGGREGATED, dict(standing, sums=1.0), standing), 0.5 / 4)
+        self.assertEqual(definition.improvement(AGGREGATED, dict(standing, web=1.0), standing), 0)  # shown alone
+        fewer = dict(AGGREGATED, weights={"science": 1, "sums": 1, "web": 0, "text": 2})
+        with self.assertRaisesRegex(ValueError, "every category"):
+            definition.improvement(fewer, standing, standing)
+
+
 # A measurement of TOY item by item: each task's questions' values and each domain's documents' bits and bytes.
 ITEMS = {"questions": {"t1": [1.0, 3.0], "t2": [2.0], "t3": [4.0, 4.0, 4.0], "t4": [5.0, 7.0], "t5": [1.0],
                        "t6": [2.0, 4.0]},
@@ -279,6 +346,18 @@ class MakeTest(unittest.TestCase):
         # what is there already is checked and kept: nothing is fetched again
         refuse = lambda *arguments: self.fail("fetched again")
         self.assertEqual(definition.make(toy, self.directory / "second", self.requests, refuse, refuse), made)
+
+    def test_refuses_bytes_of_the_domains_that_are_not_those_of_the_split_whole(self):
+        toy = self.named()
+        wholes = toy["paloma"]["whole"], toy["paloma"]["reserve"]["whole"]
+        sizes = {name: paloma.domain_bytes(self.directory / "first" / name) for name in wholes}
+        made = definition.make(dict(toy, domain_bytes=sizes), self.directory / "second", self.requests, self.download,
+                               self.listed)
+        self.assertIn(wholes[0], made)
+        wrong = {**sizes, wholes[1]: {**sizes[wholes[1]], "ptb/ptb": sizes[wholes[1]]["ptb/ptb"] + 1}}
+        with self.assertRaisesRegex(ValueError, f"bytes of {wholes[1]}"):
+            definition.make(dict(toy, domain_bytes=wrong), self.directory / "second", self.requests, self.download,
+                            self.listed)
 
     def test_refuses_what_comes_out_under_another_name_and_other_requests(self):
         toy = self.named()

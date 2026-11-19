@@ -69,6 +69,16 @@ class FetchTest(PalomaTest):
             fetched(self.directory, texts)
 
 
+    def test_counts_the_bytes_of_utf8_of_each_domains_documents(self):
+        texts = members_files()
+        texts["c4_100_domains/val/val_1_www.example.com.jsonl.gz"] = ["a café", "two"]
+        found = paloma.domain_bytes(fetched(self.directory, texts))
+        self.assertEqual(found["c4_100_domains/1_www.example.com"], len("a café".encode("utf-8")) + 3)
+        self.assertEqual(found["ptb/ptb"], len("the text of ptb "))  # a source of one domain under SOURCE/SOURCE
+        self.assertEqual(set(found), {f"{source}/{domain}" for source, domain in paloma.files(
+            fetched(self.directory / "again", texts))})
+
+
 class PartTest(PalomaTest):
     def test_gives_each_domain_the_beginnings_of_its_first_documents_within_its_bytes(self):
         texts = members_files()

@@ -12,6 +12,9 @@ domain gives its documents in their order, each from its beginning for the domai
 documents and no less than `document_bytes` (about what a model reads at once, so that long documents are read far
 from their beginnings too), until the domain's bytes are full. The part is chosen by the text's order alone.
 
+`domain_bytes` gives how much of a split each domain is, by which the bits per byte of all of a split's text, Paloma's
+own aggregate (its paper's Figure 1, perplexity over all of the data), weigh the domains' scores.
+
 `paragraphs` gives the paragraphs by which Paloma's guideline finds its text in other text (appendix C.1.1), which
 overlap.py uses.
 
@@ -106,6 +109,13 @@ def documents(paths):
         with gzip.open(path, "rt", encoding="utf-8") as lines:
             for line in lines:
                 yield json.loads(line)["text"]
+
+
+def domain_bytes(artifact):
+    """The bytes of UTF-8 of each domain's documents in an artifact that `fetch` made ({SOURCE/DOMAIN: bytes}), a
+    source of one domain under SOURCE/SOURCE."""
+    return {f"{source}/{name}": sum(len(text.encode("utf-8")) for text in documents(paths))
+            for (source, name), paths in files(artifact).items()}
 
 
 def beginning(text, limit):

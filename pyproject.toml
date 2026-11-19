@@ -17,4 +17,4 @@ py-modules = ["olmes_measure"]
 packages = ["language_model_evaluation"]
 
 [tool.setuptools.package-data]
-language_model_evaluation = ["definitions/*.json"]
+language_model_evaluation = ["definitions/*.json", "definitions/bytes/*.json"]
