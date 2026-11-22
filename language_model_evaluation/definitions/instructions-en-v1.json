@@ -1,0 +1,30 @@
+{
+ "instructions": {
+  "repository": "CONE-MT/BenchMAX",
+  "commit": "03cfd656c1b0b93647b5dabf5a11ce9be362493c",
+  "data": "LLaMAX/BenchMAX_Rule-based",
+  "revision": "36a659fc9dddc2b344d98971ea0643527a3658d1",
+  "level": "strict",
+  "max_new_tokens": 2048
+ },
+ "ifbench": {
+  "repository": "allenai/IFBench",
+  "commit": "488918665d53f867fa908a293769ec6e71e74aec",
+  "level": "strict",
+  "max_new_tokens": 2048
+ },
+ "categories": {
+  "ifeval": {
+   "instructions": [
+    "en"
+   ]
+  },
+  "ifbench": {
+   "ifbench": [
+    "en"
+   ]
+  }
+ },
+ "better": "higher",
+ "compare": "mean_rate"
+}

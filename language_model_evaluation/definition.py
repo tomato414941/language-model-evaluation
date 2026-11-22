@@ -16,8 +16,8 @@ A definition (definitions/NAME.json) says
 - how two results compare (`improvement`): by the mean of the categories' rates of improvement, with `languages` by
   the mean of each language's, or by their mean weighted by the definition's `weights`, in which a category of
   weight 0 is shown and decides nothing; a score improves as it falls (bits per byte) unless the definition says
-  that a higher one is `better`, as the share of prompts whose instructions a model follows (instructions.py,
-  `followed`).
+  that a higher one is `better`, as the share of prompts whose instructions a model follows (`followed`): of
+  BenchMAX's prompts (`instructions`, instructions.py) or of IFBench's (`ifbench`, ifbench.py).
 
 A definition of a balance (`balance`: two languages) measures instead the same sentences in both, FLORES+'s (`flores`:
 flores.fetch's split), with the text that nothing measured by it may learn under `overlap` (flores.make_overlap: both
@@ -53,6 +53,8 @@ from . import flores, japanese, japanese_text, overlap, paloma
 
 DEFINITIONS = Path(__file__).parent / "definitions"
 AGGREGATE = "paloma_aggregate"  # a category of all of Paloma's text, the domains weighed by their bytes
+# The sources of prompts whose instructions a model follows: BenchMAX's (instructions.py) and IFBench's (ifbench.py).
+PROMPTS = ("instructions", "ifbench")
 
 
 def load(name):
@@ -65,7 +67,7 @@ def load(name):
     else:
         whole = load(own["within"])
         merged = {**whole, **own, "name": name}
-        for section in ("olmes", "paloma", "japanese", "japanese_text", "instructions"):
+        for section in ("olmes", "paloma", "japanese", "japanese_text", *PROMPTS):
             if section in whole:
                 merged[section] = {**whole[section], **own.get(section, {})}
     if any(AGGREGATE in parts for parts in merged.get("categories", {}).values()):
@@ -255,11 +257,19 @@ def _aggregate(definition, domains, partial):
     return sum(sizes[key] * bits for key, bits in found.items()) / total
 
 
+def prompts_name(source, language):
+    """The name of a language's prompts of a source of PROMPTS, by which a measurement holds their results: the
+    language's for BenchMAX's, SOURCE/LANGUAGE for another's."""
+    return language if source == "instructions" else f"{source}/{language}"
+
+
 def followed(definition, shares):
-    """The score of each category of instructions, from each language's share of prompts whose every instruction a
-    model follows at the definition's level ({language: share}, as instructions.score gives them)."""
-    return {category: _mean(shares[language] for language in parts["instructions"])
-            for category, parts in definition["categories"].items() if "instructions" in parts}
+    """The score of each category of instructions, from the share of each source's prompts of a language whose every
+    instruction a model follows at the source's level ({prompts_name: share}, as instructions.score and ifbench.score
+    give them)."""
+    return {category: _mean(shares[prompts_name(source, language)] for source in PROMPTS
+                            for language in parts.get(source, ()))
+            for category, parts in definition["categories"].items() if any(source in parts for source in PROMPTS)}
 
 
 def categories(definition):
