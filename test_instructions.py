@@ -72,7 +72,7 @@ class PromptsTest(unittest.TestCase):
 
 class FollowedTest(unittest.TestCase):
     def test_a_higher_share_of_prompts_followed_is_the_better_and_each_language_counts_equally(self):
-        chosen = definition.load("instructions-ja-en-1")
+        chosen = definition.load("instructions-ja-en-v1")
         self.assertEqual((chosen["instructions"]["commit"], chosen["instructions"]["revision"]),
                          (instructions.COMMIT, instructions.REVISION))
         standing = definition.followed(chosen, {"en": 0.30, "ja": 0.15})

@@ -20,9 +20,9 @@ BOTH = {**TOY, "compare": "mean_rate_by_language", "japanese": {"suites": ["ja"]
 
 class LoadTest(unittest.TestCase):
     def test_a_definition_within_another_says_what_differs_and_takes_the_rest(self):
-        whole, part = definition.load("knowledge-en-1"), definition.load("knowledge-en-part-1")
+        whole, part = definition.load("knowledge-en-v1"), definition.load("knowledge-en-part-v1")
         self.assertNotIn("within", whole)
-        self.assertEqual((part["name"], part["within"]), ("knowledge-en-part-1", "knowledge-en-1"))
+        self.assertEqual((part["name"], part["within"]), ("knowledge-en-part-v1", "knowledge-en-v1"))
         for key in ("categories", "compare", "overlap"):
             self.assertEqual(part[key], whole[key])
         self.assertEqual(part["olmes"]["requests"], whole["olmes"]["requests"])
@@ -37,7 +37,7 @@ class LoadTest(unittest.TestCase):
 
 class TwoLanguagesTest(unittest.TestCase):
     def test_knowledge_ja_en_measures_knowledge_en_beside_japanese_and_counts_the_two_languages_equally(self):
-        english, both = definition.load("knowledge-en-1"), definition.load("knowledge-ja-en-1")
+        english, both = definition.load("knowledge-en-v1"), definition.load("knowledge-ja-en-v1")
         for section in ("olmes", "paloma"):
             self.assertEqual(both[section], english[section])
         self.assertEqual({k: v for k, v in both["overlap"].items() if k != "japanese"}, english["overlap"])
@@ -47,8 +47,8 @@ class TwoLanguagesTest(unittest.TestCase):
         self.assertEqual(list(definition.members(both, "japanese_text")), ["ja_web", "ja_encyclopedia"])
 
     def test_knowledge_ja_en_part_cuts_the_questions_and_the_text_of_both_languages_alike(self):
-        whole, part = definition.load("knowledge-ja-en-1"), definition.load("knowledge-ja-en-part-1")
-        self.assertEqual(part["within"], "knowledge-ja-en-1")
+        whole, part = definition.load("knowledge-ja-en-v1"), definition.load("knowledge-ja-en-part-v1")
+        self.assertEqual(part["within"], "knowledge-ja-en-v1")
         for key in ("categories", "languages", "compare", "overlap"):
             self.assertEqual(part[key], whole[key])
         self.assertEqual((part["olmes"]["per_task"], part["japanese"]["per_task"]), (3000, 3000))
@@ -138,7 +138,7 @@ AGGREGATED = {**TOY, "categories": {**TOY["categories"], "text": {"paloma_aggreg
 
 class AggregateTest(unittest.TestCase):
     def test_knowledge_en_2_reads_what_knowledge_en_1_reads_and_weighs_paloma_aggregate_as_all_the_answers(self):
-        old, new = definition.load("knowledge-en-1"), definition.load("knowledge-en-2")
+        old, new = definition.load("knowledge-en-v1"), definition.load("knowledge-en-v2")
         for section in ("olmes", "paloma", "overlap"):
             self.assertEqual(new[section], old[section])
         self.assertEqual(definition.members(new), definition.members(old))  # the same artifacts serve both
@@ -147,13 +147,13 @@ class AggregateTest(unittest.TestCase):
         self.assertEqual({weights[category] for category in answered}, {1})
         self.assertEqual(weights["text"], len(answered))
         self.assertEqual({weights[category] for category in definition.members(new)}, {0})  # shown alone
-        old_part, new_part = definition.load("knowledge-en-part-1"), definition.load("knowledge-en-part-2")
-        self.assertEqual(new_part["within"], "knowledge-en-2")
+        old_part, new_part = definition.load("knowledge-en-part-v1"), definition.load("knowledge-en-part-v2")
+        self.assertEqual(new_part["within"], "knowledge-en-v2")
         for section in ("olmes", "paloma"):
             self.assertEqual(new_part[section], old_part[section])
 
     def test_the_bytes_of_each_split_whole_hold_every_member_of_the_text_and_nothing_else(self):
-        found = definition.load("knowledge-en-part-2")
+        found = definition.load("knowledge-en-part-v2")
         text = found["paloma"]
         self.assertEqual(set(found["domain_bytes"]), {text["whole"], text["reserve"]["whole"]})
         names = [name for names in definition.members(found).values() for name in names]
@@ -254,7 +254,7 @@ BALANCE = {"name": "toy-balance", "balance": ["ja", "en"]}
 
 class BalanceTest(unittest.TestCase):
     def test_balance_ja_en_reads_flores_devtest_in_japanese_over_english_and_keeps_both_splits_out_of_training(self):
-        chosen = definition.load("balance-ja-en-1")
+        chosen = definition.load("balance-ja-en-v1")
         self.assertEqual((chosen["flores"]["repository"], chosen["flores"]["revision"]),
                          (flores.REPOSITORY, flores.REVISION))
         self.assertEqual((chosen["flores"]["split"], chosen["balance"]), ("devtest", ["jpn_Jpan", "eng_Latn"]))
