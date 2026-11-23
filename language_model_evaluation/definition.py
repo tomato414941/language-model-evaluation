@@ -17,7 +17,8 @@ A definition (definitions/NAME.json) says
   the mean of each language's, or by their mean weighted by the definition's `weights`, in which a category of
   weight 0 is shown and decides nothing; a score improves as it falls (bits per byte) unless the definition says
   that a higher one is `better`, as the share of prompts whose instructions a model follows (`followed`): of
-  BenchMAX's prompts (`instructions`, instructions.py) or of IFBench's (`ifbench`, ifbench.py).
+  BenchMAX's prompts (`instructions`, instructions.py), of IFBench's (`ifbench`, ifbench.py) or of M-IFEval's
+  (`mifeval`, mifeval.py).
 
 A definition of a balance (`balance`: two languages) measures instead the same sentences in both, FLORES+'s (`flores`:
 flores.fetch's split), with the text that nothing measured by it may learn under `overlap` (flores.make_overlap: both
@@ -53,8 +54,9 @@ from . import flores, japanese, japanese_text, overlap, paloma
 
 DEFINITIONS = Path(__file__).parent / "definitions"
 AGGREGATE = "paloma_aggregate"  # a category of all of Paloma's text, the domains weighed by their bytes
-# The sources of prompts whose instructions a model follows: BenchMAX's (instructions.py) and IFBench's (ifbench.py).
-PROMPTS = ("instructions", "ifbench")
+# The sources of prompts whose instructions a model follows: BenchMAX's (instructions.py), IFBench's (ifbench.py) and
+# M-IFEval's (mifeval.py).
+PROMPTS = ("instructions", "ifbench", "mifeval")
 
 
 def load(name):
@@ -265,8 +267,7 @@ def prompts_name(source, language):
 
 def followed(definition, shares):
     """The score of each category of instructions, from the share of each source's prompts of a language whose every
-    instruction a model follows at the source's level ({prompts_name: share}, as instructions.score and ifbench.score
-    give them)."""
+    instruction a model follows at the source's level ({prompts_name: share}, as each source's `score` gives them)."""
     return {category: _mean(shares[prompts_name(source, language)] for source in PROMPTS
                             for language in parts.get(source, ()))
             for category, parts in definition["categories"].items() if any(source in parts for source in PROMPTS)}

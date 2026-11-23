@@ -62,21 +62,23 @@ def prompts(language, home):
     return read_lines(Path(home) / PROMPTS)
 
 
-# Run in the authors' environment: each reply checked by their strict and loose tests, each with the same seeds.
+# Run in the authors' environment: each reply checked by the strict and loose tests of their module of checks, each
+# with the same seeds.
 CHECK = """
-import json, random, sys
-home, directory = sys.argv[1:]
+import importlib, json, random, sys
+home, directory, name = sys.argv[1:]
 sys.path.insert(0, home)
-import langdetect, evaluation_lib
+import langdetect
+checks = importlib.import_module(name)
 rows = [json.loads(line) for line in open(directory + "/responses.jsonl", encoding="utf-8")]
 for level in ("strict", "loose"):
-    test = getattr(evaluation_lib, "test_instruction_following_" + level)
+    test = getattr(checks, "test_instruction_following_" + level)
     with open(directory + "/eval_results_" + level + ".jsonl", "w", encoding="utf-8") as out:
         for row in rows:
             random.seed(0)
             langdetect.DetectorFactory.seed = 0
-            asked = evaluation_lib.InputExample(key=row["key"], instruction_id_list=row["instruction_id_list"],
-                                                prompt=row["prompt"], kwargs=row["kwargs"])
+            asked = checks.InputExample(key=row["key"], instruction_id_list=row["instruction_id_list"],
+                                        prompt=row["prompt"], kwargs=row["kwargs"])
             found = test(asked, {row["prompt"]: row["response"]})
             result = {"prompt": row["prompt"], "follow_all_instructions": found.follow_all_instructions,
                       "follow_instruction_list": found.follow_instruction_list}
@@ -84,14 +86,15 @@ for level in ("strict", "loose"):
 """
 
 
-def evaluated(asked, replies, directory, home, python):
-    """The authors' results of each level for replies ({prompt: reply}) to prompts (as `prompts` gives them)."""
+def evaluated(asked, replies, directory, home, python, checks="evaluation_lib"):
+    """The authors' results of each level for replies ({prompt: reply}) to prompts (as `prompts` gives them), from the
+    tests of their module of checks, which M-IFEval's code holds as IFBench's does (mifeval.py)."""
     if set(replies) != {row["prompt"] for row in asked}:
         raise ValueError("the replies do not answer each of the prompts once")
     directory = Path(directory).absolute()
     write_lines(directory / "responses.jsonl", [{**row, "response": replies[row["prompt"]]} for row in asked])
     # The environment's Python stays the link that it is, by which it finds the environment's packages.
-    run(str(Path(python).absolute()), "-c", CHECK, str(Path(home).absolute()), str(directory))
+    run(str(Path(python).absolute()), "-c", CHECK, str(Path(home).absolute()), str(directory), checks)
     return {level: read_lines(directory / f"eval_results_{level}.jsonl") for level in LEVELS}
 
 

@@ -6,6 +6,9 @@ publisher defines it and that find the text that overlaps it, and the evaluation
 - japanese: Japanese tasks asked as OLMES asks English ones for bits per byte, as a requests artifact of its form.
 - japanese_text: Japanese text held out of public corpora, kept as Paloma keeps its text.
 - instructions: following instructions as BenchMAX asks and scores it in English and Japanese, by the authors' code.
+- ifbench: following instructions of kinds that IFEval does not ask, as IFBench asks and scores them in English.
+- mifeval: following instructions in Japanese, of IFEval's kinds and of kinds of Japanese writing, as M-IFEval asks
+  and scores them.
 - flores: FLORES+'s sentences, the same in English and Japanese, by which a model's reading of the two compares.
 - overlap: the documents that hold a benchmark's questions or text, which nothing that is measured by it may learn.
 - definition: evaluation definitions by name (definitions/NAME.json): the data that is measured, how it is divided
